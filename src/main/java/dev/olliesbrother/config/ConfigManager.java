@@ -230,7 +230,246 @@ public final class ConfigManager {
                 }
 
                 validateRestart(loadedConfig.restart);
+
+                if (loadedConfig.maintenance == null) {
+                    loadedConfig.maintenance =
+                            new MaintenanceConfig();
+                }
+
+                validateMaintenance(
+                        loadedConfig.maintenance
+                );
+
+
             }
+        }
+    }
+
+    private static void validateMaintenance(
+            MaintenanceConfig maintenance
+    ) {
+        if (maintenance.reason == null ||
+                maintenance.reason.isBlank()) {
+
+            maintenance.reason =
+                    "The server is currently undergoing maintenance.";
+        }
+
+        if (maintenance.allowedPlayers == null) {
+            maintenance.allowedPlayers =
+                    new ArrayList<>();
+        }
+
+        maintenance.allowedPlayers.removeIf(
+                player ->
+                        player == null ||
+                                player.isBlank()
+        );
+
+        for (int index = 0;
+             index < maintenance.allowedPlayers.size();
+             index++) {
+
+            maintenance.allowedPlayers.set(
+                    index,
+                    maintenance.allowedPlayers
+                            .get(index)
+                            .trim()
+            );
+        }
+
+        if (maintenance.disconnectSections == null ||
+                maintenance.disconnectSections.isEmpty()) {
+
+            throw new JsonParseException(
+                    "Maintenance mode must contain " +
+                            "at least one disconnect section."
+            );
+        }
+
+        for (int index = 0;
+             index < maintenance.disconnectSections.size();
+             index++) {
+
+            AnnouncementSectionConfig section =
+                    maintenance.disconnectSections.get(index);
+
+            if (section == null ||
+                    section.text == null ||
+                    section.text.isEmpty()) {
+
+                throw new JsonParseException(
+                        "Maintenance disconnect section " +
+                                (index + 1) +
+                                " has no text."
+                );
+            }
+
+            validateSectionStyle(
+                    "maintenance",
+                    index,
+                    section
+            );
+        }
+
+        if (maintenance.schedule == null) {
+            maintenance.schedule =
+                    new MaintenanceScheduleConfig();
+        }
+
+        validateMaintenanceSchedule(
+                maintenance.schedule
+        );
+    }
+
+    private static void validateMaintenanceSchedule(
+            MaintenanceScheduleConfig schedule
+    ) {
+        DeliveryMode deliveryMode;
+
+        try {
+            deliveryMode =
+                    DeliveryMode.fromConfig(
+                            schedule.warningDelivery
+                    );
+        } catch (IllegalArgumentException exception) {
+            throw new JsonParseException(
+                    "Maintenance schedule warningDelivery must be " +
+                            "chat, action_bar, title or subtitle."
+            );
+        }
+
+        if (deliveryMode == DeliveryMode.BOSS_BAR) {
+            throw new JsonParseException(
+                    "Maintenance schedule warningDelivery cannot " +
+                            "be boss_bar. Use the separate bossBar settings."
+            );
+        }
+
+        schedule.warningDelivery =
+                deliveryMode.getConfigName();
+
+        validateMaintenanceWarningTimes(schedule);
+        validateMaintenanceScheduleSections(schedule);
+
+        if (schedule.titleTiming == null) {
+            schedule.titleTiming =
+                    new TitleTimingConfig();
+        }
+
+        validateTitleTiming(
+                "maintenance schedule",
+                schedule.titleTiming
+        );
+
+        if (schedule.bossBar == null) {
+            schedule.bossBar =
+                    new MaintenanceBossBarConfig();
+        }
+
+        try {
+            BossBarValueParser.parseColor(
+                    schedule.bossBar.color
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new JsonParseException(
+                    "Maintenance schedule boss-bar colour is invalid: " +
+                            exception.getMessage()
+            );
+        }
+
+        try {
+            BossBarValueParser.parseStyle(
+                    schedule.bossBar.style
+            );
+        } catch (IllegalArgumentException exception) {
+            throw new JsonParseException(
+                    "Maintenance schedule boss-bar style is invalid: " +
+                            exception.getMessage()
+            );
+        }
+    }
+
+    private static void validateMaintenanceWarningTimes(
+            MaintenanceScheduleConfig schedule
+    ) {
+        if (schedule.warningTimes == null) {
+            schedule.warningTimes =
+                    new ArrayList<>();
+
+            return;
+        }
+
+        Set<Long> usedTimes =
+                new HashSet<>();
+
+        List<String> normalized =
+                new ArrayList<>();
+
+        for (String warning :
+                schedule.warningTimes) {
+
+            long seconds;
+
+            try {
+                seconds =
+                        DurationParser.toSeconds(warning);
+            } catch (IllegalArgumentException exception) {
+                throw new JsonParseException(
+                        "Invalid maintenance warning time: " +
+                                exception.getMessage()
+                );
+            }
+
+            if (!usedTimes.add(seconds)) {
+                continue;
+            }
+
+            normalized.add(
+                    warning.trim()
+                            .toLowerCase(Locale.ROOT)
+            );
+        }
+
+        schedule.warningTimes =
+                normalized;
+    }
+
+    private static void validateMaintenanceScheduleSections(
+            MaintenanceScheduleConfig schedule
+    ) {
+        if (schedule.sections == null ||
+                schedule.sections.isEmpty()) {
+
+            throw new JsonParseException(
+                    "Maintenance schedule must contain " +
+                            "at least one message section."
+            );
+        }
+
+        for (int index = 0;
+             index < schedule.sections.size();
+             index++) {
+
+            AnnouncementSectionConfig section =
+                    schedule.sections.get(index);
+
+            if (section == null ||
+                    section.text == null ||
+                    section.text.isEmpty()) {
+
+                throw new JsonParseException(
+                        "Maintenance schedule section " +
+                                (index + 1) +
+                                " has no text."
+                );
+            }
+
+            validateSectionStyle(
+                    "maintenance schedule",
+                    index,
+                    section
+            );
         }
     }
 
@@ -851,4 +1090,29 @@ public final class ConfigManager {
                 );
             }
         }
+
+    public static boolean saveCurrent() {
+        try {
+            Files.createDirectories(
+                    CONFIG_PATH.getParent()
+            );
+
+            save();
+
+            ServerSignals.LOGGER.info(
+                    "Saved Server Signals configuration to {}.",
+                    CONFIG_PATH
+            );
+
+            return true;
+
+        } catch (IOException exception) {
+            ServerSignals.LOGGER.error(
+                    "Could not save Server Signals configuration.",
+                    exception
+            );
+
+            return false;
+        }
+    }
 }

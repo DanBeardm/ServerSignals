@@ -97,4 +97,7 @@ public final class ServerSignalsConfig {
 
     public RestartConfig restart =
             new RestartConfig();
+
+    public MaintenanceConfig maintenance =
+            new MaintenanceConfig();
 }

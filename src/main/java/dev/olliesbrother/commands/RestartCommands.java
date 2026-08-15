@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.olliesbrother.ServerSignals;
 import dev.olliesbrother.config.ConfigManager;
+import dev.olliesbrother.maintenance.MaintenanceCountdownManager;
 import dev.olliesbrother.restart.RestartCountdownManager;
 import dev.olliesbrother.restart.RestartCountdownManager.RestartStatus;
 import dev.olliesbrother.util.DurationFormatter;
@@ -102,6 +103,19 @@ public final class RestartCommands {
             ServerCommandSource source,
             String durationInput
     ) {
+        if (MaintenanceCountdownManager
+                .getStatus()
+                .active()) {
+
+            source.sendError(
+                    Text.literal(
+                            "A maintenance countdown is currently active. " +
+                                    "Cancel it before scheduling a restart."
+                    )
+            );
+
+            return 0;
+        }
         if (!ConfigManager.getConfig()
                 .restart.enabled) {
 

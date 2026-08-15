@@ -4,6 +4,8 @@ import dev.olliesbrother.commands.RestartCommands;
 import dev.olliesbrother.commands.ServerSignalsCommands;
 import dev.olliesbrother.config.ConfigManager;
 import dev.olliesbrother.delivery.BossBarDeliveryService;
+import dev.olliesbrother.events.MaintenanceConnectionHandler;
+import dev.olliesbrother.maintenance.MaintenanceCountdownManager;
 import dev.olliesbrother.restart.RestartCountdownManager;
 import dev.olliesbrother.scheduler.AnnouncementScheduler;
 import dev.olliesbrother.scheduler.CommandScheduler;
@@ -29,12 +31,16 @@ public final class ServerSignals implements ModInitializer {
         SeenPlayerStore.load();
 
         BossBarDeliveryService.register();
+
         AnnouncementScheduler.register();
         CommandScheduler.register();
         RestartCountdownManager.register();
+        MaintenanceCountdownManager.register();
 
         VanillaPlayerMessageSuppressor.register();
+        MaintenanceConnectionHandler.register();
         PlayerConnectionHandler.register();
+
 
         ServerSignalsCommands.register();
 

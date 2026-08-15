@@ -82,6 +82,7 @@ public final class ServerSignalsCommands {
                                         .then(ScheduledCommandCommands.build())
                                         .then(PlayerMessageCommands.build())
                                         .then(RestartCommands.build())
+                                        .then(MaintenanceCommands.build())
                         )
         );
     }
