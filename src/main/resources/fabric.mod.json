@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "server_signals",
+  "version": "${version}",
+  "name": "Server Signals",
+  "description": "A configurable server-side scheduling and communication toolkit for Fabric servers.",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/server_signals/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "dev.olliesbrother.ServerSignals"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
