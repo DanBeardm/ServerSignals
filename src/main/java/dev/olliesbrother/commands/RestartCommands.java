@@ -5,6 +5,8 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.olliesbrother.ServerSignals;
 import dev.olliesbrother.config.ConfigManager;
 import dev.olliesbrother.maintenance.MaintenanceCountdownManager;
+import dev.olliesbrother.permissions.PermissionHelper;
+import dev.olliesbrother.permissions.PermissionNodes;
 import dev.olliesbrother.restart.RestartCountdownManager;
 import dev.olliesbrother.restart.RestartCountdownManager.RestartStatus;
 import dev.olliesbrother.util.DurationFormatter;
@@ -22,10 +24,15 @@ public final class RestartCommands {
 
     public static LiteralArgumentBuilder<ServerCommandSource>
     build() {
-        return CommandManager.literal("restart")
-                .requires(source ->
-                        source.hasPermissionLevel(4)
-                )
+        return
+
+                CommandManager.literal("status")
+                        .requires(
+                                PermissionHelper.require(
+                                        PermissionNodes.RESTART_STATUS,
+                                        2
+                                )
+                        )
 
                 // /serversignals restart
                 .executes(context ->
@@ -37,34 +44,11 @@ public final class RestartCommands {
                 // /serversignals restart start <duration>
                 .then(
                         CommandManager.literal("start")
-                                .then(
-                                        CommandManager.argument(
-                                                        "duration",
-                                                        StringArgumentType.word()
-                                                )
-                                                .suggests(
-                                                        (context, builder) ->
-                                                                CommandSource.suggestMatching(
-                                                                        new String[]{
-                                                                                "30s",
-                                                                                "1m",
-                                                                                "5m",
-                                                                                "10m",
-                                                                                "30m",
-                                                                                "1h"
-                                                                        },
-                                                                        builder
-                                                                )
-                                                )
-                                                .executes(context ->
-                                                        start(
-                                                                context.getSource(),
-                                                                StringArgumentType.getString(
-                                                                        context,
-                                                                        "duration"
-                                                                )
-                                                        )
-                                                )
+                                .requires(
+                                        PermissionHelper.require(
+                                                PermissionNodes.RESTART_START,
+                                                4
+                                        )
                                 )
                 )
 
@@ -81,9 +65,10 @@ public final class RestartCommands {
                 // /serversignals restart cancel
                 .then(
                         CommandManager.literal("cancel")
-                                .executes(context ->
-                                        cancel(
-                                                context.getSource()
+                                .requires(
+                                        PermissionHelper.require(
+                                                PermissionNodes.RESTART_CANCEL,
+                                                4
                                         )
                                 )
                 )
@@ -91,9 +76,10 @@ public final class RestartCommands {
                 // /serversignals restart now
                 .then(
                         CommandManager.literal("now")
-                                .executes(context ->
-                                        restartNow(
-                                                context.getSource()
+                                .requires(
+                                        PermissionHelper.require(
+                                                PermissionNodes.RESTART_NOW,
+                                                4
                                         )
                                 )
                 );

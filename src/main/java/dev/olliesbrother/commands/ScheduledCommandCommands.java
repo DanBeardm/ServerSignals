@@ -5,6 +5,8 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.olliesbrother.ServerSignals;
 import dev.olliesbrother.config.ConfigManager;
 import dev.olliesbrother.config.ScheduledCommandConfig;
+import dev.olliesbrother.permissions.PermissionHelper;
+import dev.olliesbrother.permissions.PermissionNodes;
 import dev.olliesbrother.scheduler.CommandScheduler;
 import net.minecraft.command.CommandSource;
 import net.minecraft.server.command.CommandManager;
@@ -19,12 +21,12 @@ public final class ScheduledCommandCommands {
 
     public static LiteralArgumentBuilder<ServerCommandSource>
     build() {
-        return CommandManager.literal("command")
-
-                // /serversignals command
-                .executes(context ->
-                        showSummary(
-                                context.getSource()
+        return
+                CommandManager.literal("command")
+                .requires(
+                        PermissionHelper.require(
+                                PermissionNodes.SCHEDULED_COMMAND_LIST,
+                                2
                         )
                 )
 
@@ -39,37 +41,13 @@ public final class ScheduledCommandCommands {
                 )
 
                 // /serversignals command test <id>
-                .then(
-                        CommandManager.literal("test")
-                                .then(
-                                        CommandManager.argument(
-                                                        "id",
-                                                        StringArgumentType.word()
-                                                )
-                                                .suggests(
-                                                        (context, builder) ->
-                                                                CommandSource.suggestMatching(
-                                                                        ConfigManager
-                                                                                .getConfig()
-                                                                                .scheduledCommands
-                                                                                .stream()
-                                                                                .map(task ->
-                                                                                        task.id
-                                                                                ),
-                                                                        builder
-                                                                )
-                                                )
-                                                .executes(context ->
-                                                        testTask(
-                                                                context.getSource(),
-                                                                StringArgumentType.getString(
-                                                                        context,
-                                                                        "id"
-                                                                )
-                                                        )
-                                                )
-                                )
+                .requires(
+                        PermissionHelper.require(
+                                PermissionNodes.SCHEDULED_COMMAND_TEST,
+                                4
+                        )
                 );
+
     }
 
     private static int showSummary(

@@ -5,6 +5,8 @@ import dev.olliesbrother.config.ConfigManager;
 import dev.olliesbrother.config.PlayerMessageConfig;
 import dev.olliesbrother.config.PlayerMessagesConfig;
 import dev.olliesbrother.delivery.PlayerMessageDeliveryService;
+import dev.olliesbrother.permissions.PermissionHelper;
+import dev.olliesbrother.permissions.PermissionNodes;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -19,11 +21,12 @@ public final class PlayerMessageCommands {
 
     public static LiteralArgumentBuilder<ServerCommandSource>
     build() {
-        return CommandManager.literal("player-message")
-
-                .executes(context ->
-                        showStatus(
-                                context.getSource()
+        return
+                CommandManager.literal("player-message")
+                .requires(
+                        PermissionHelper.require(
+                                PermissionNodes.PLAYER_MESSAGE_TEST,
+                                2
                         )
                 )
 
