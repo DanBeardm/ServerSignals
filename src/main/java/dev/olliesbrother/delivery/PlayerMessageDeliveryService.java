@@ -29,7 +29,7 @@ public final class PlayerMessageDeliveryService {
             boolean firstJoin,
             boolean subjectIsConnected
     ) {
-        if (config == null || !config.enabled) {
+        if (config == null) {
             return false;
         }
 

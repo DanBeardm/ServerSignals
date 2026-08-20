@@ -56,6 +56,9 @@ public final class PermissionNodes {
     public static final String MAINTENANCE_BYPASS =
             "serversignals.maintenance.bypass";
 
+    public static final String VALIDATE =
+            "serversignals.validate";
+
     private PermissionNodes() {
         // Constants only
     }

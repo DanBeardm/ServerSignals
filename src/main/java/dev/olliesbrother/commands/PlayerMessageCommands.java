@@ -128,16 +128,6 @@ public final class PlayerMessageCommands {
                         true
                 );
 
-        if (!delivered) {
-            source.sendError(
-                    Text.literal(
-                            "The player message is disabled " +
-                                    "or had no recipients."
-                    )
-            );
-
-            return 0;
-        }
 
         source.sendFeedback(
                 () -> Text.literal(

@@ -152,6 +152,14 @@ public final class HelpCommand {
                 "View maintenance status."
         );
 
+        visibleCommands += sendIfAllowed(
+                source,
+                PermissionNodes.VALIDATE,
+                2,
+                "/serversignals validate",
+                "Check configuration without applying it."
+        );
+
         if (visibleCommands == 0) {
             source.sendFeedback(
                     () -> Text.literal(
@@ -481,6 +489,14 @@ public final class HelpCommand {
                 4,
                 "/serversignals reload",
                 "Reload server_signals.json."
+        );
+
+        visible += sendIfAllowed(
+                source,
+                PermissionNodes.VALIDATE,
+                2,
+                "/serversignals validate",
+                "Check configuration files without applying changes."
         );
 
         sendNoAccessIfEmpty(

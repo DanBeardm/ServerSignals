@@ -126,8 +126,111 @@ public final class ServerSignalsCommands {
                                         .then(PlayerMessageCommands.build())
                                         .then(RestartCommands.build())
                                         .then(MaintenanceCommands.build())
+                                        .then(
+                                                CommandManager.literal("validate")
+                                                        .requires(
+                                                                PermissionHelper.require(
+                                                                        PermissionNodes.VALIDATE,
+                                                                        2
+                                                                )
+                                                        )
+                                                        .executes(context ->
+                                                                validateConfig(
+                                                                        context.getSource()
+                                                                )
+                                                        )
+                                        )
                         )
         );
+    }
+
+
+    private static int validateConfig(
+            ServerCommandSource source
+    ) {
+
+        boolean success =
+                ConfigManager.validateOnly();
+
+        if (!success) {
+
+            source.sendError(
+                    Text.literal(
+                            "Server Signals configuration is invalid."
+                    )
+            );
+
+            String error =
+                    ConfigManager.getLastError();
+
+            if (error != null &&
+                    !error.isBlank()) {
+
+                source.sendError(
+                        Text.literal(
+                                error
+                        )
+                );
+            }
+
+            source.sendFeedback(
+                    () -> Text.literal(
+                            "Active configuration was not changed."
+                    ).formatted(
+                            Formatting.GRAY
+                    ),
+                    false
+            );
+
+            return 0;
+        }
+
+
+        source.sendFeedback(
+                () -> Text.literal(
+                        "Server Signals configuration is valid."
+                ).formatted(
+                        Formatting.GREEN,
+                        Formatting.BOLD
+                ),
+                false
+        );
+
+        sendConfigSuccess(
+                source,
+                "announcements.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "scheduled_commands.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "player_messages.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "restart.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "maintenance.json"
+        );
+
+        source.sendFeedback(
+                () -> Text.literal(
+                        "No changes were applied."
+                ).formatted(
+                        Formatting.GRAY
+                ),
+                false
+        );
+
+        return 1;
     }
 
     private static int showStatus(
@@ -330,38 +433,108 @@ public final class ServerSignalsCommands {
     private static int reload(
             ServerCommandSource source
     ) {
-        boolean loaded = ConfigManager.load();
 
-        if (!loaded) {
+        boolean success =
+                ConfigManager.load();
+
+        if (!success) {
+
             source.sendError(
                     Text.literal(
-                            "Could not reload Server Signals. " +
-                                    "Check the server console."
+                            "Could not reload Server Signals."
                     )
+            );
+
+            String error =
+                    ConfigManager.getLastError();
+
+            if (error != null &&
+                    !error.isBlank()) {
+
+                source.sendError(
+                        Text.literal(
+                                error
+                        )
+                );
+            }
+
+            source.sendFeedback(
+                    () -> Text.literal(
+                            "Previous configuration remains active."
+                    ).formatted(
+                            Formatting.GRAY
+                    ),
+                    false
             );
 
             return 0;
         }
 
-        AnnouncementScheduler.resetAll();
-        CommandScheduler.resetAll();
 
         source.sendFeedback(
                 () -> Text.literal(
-                        "Server Signals reloaded. " +
-                                ConfigManager.getConfig()
-                                        .announcements.size() +
-                                " announcements loaded."
+                        "Server Signals configuration reloaded."
+                ).formatted(
+                        Formatting.GREEN,
+                        Formatting.BOLD
                 ),
-                false
+                true
         );
 
+
+        sendConfigSuccess(
+                source,
+                "announcements.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "scheduled_commands.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "player_messages.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "restart.json"
+        );
+
+        sendConfigSuccess(
+                source,
+                "maintenance.json"
+        );
+
+
         ServerSignals.LOGGER.info(
-                "Configuration reloaded by {}.",
+                "Server Signals configuration reloaded by {}.",
                 source.getName()
         );
 
         return 1;
+    }
+
+    private static void sendConfigSuccess(
+            ServerCommandSource source,
+            String fileName
+    ) {
+
+        source.sendFeedback(
+                () -> Text.literal(
+                        "✓ "
+                ).formatted(
+                        Formatting.GREEN
+                ).append(
+                        Text.literal(
+                                fileName
+                        ).formatted(
+                                Formatting.GRAY
+                        )
+                ),
+                false
+        );
     }
 
     private static int testFirstEnabled(

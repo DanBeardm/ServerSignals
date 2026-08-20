@@ -4,17 +4,9 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
 import dev.olliesbrother.ServerSignals;
-import dev.olliesbrother.delivery.BossBarValueParser;
-import dev.olliesbrother.delivery.DeliveryMode;
-import dev.olliesbrother.delivery.PlayerMessageAudience;
 import dev.olliesbrother.util.DurationParser;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.Formatting;
-import java.util.ArrayList;
-import java.util.List;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.Locale;
+
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -22,1097 +14,1649 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public final class ConfigManager {
-    private static final Gson GSON = new GsonBuilder()
-            .setPrettyPrinting()
-            .create();
 
-    private static final Path CONFIG_PATH =
+    private static final Gson GSON =
+            new GsonBuilder()
+                    .setPrettyPrinting()
+                    .disableHtmlEscaping()
+                    .create();
+
+    /*
+     * config/ServerSignals/
+     */
+    private static final Path CONFIG_DIR =
             FabricLoader.getInstance()
                     .getConfigDir()
-                    .resolve("ServerSignals/server_signals.json");
+                    .resolve("ServerSignals");
 
+    /*
+     * Individual configuration files.
+     */
+    private static final Path ANNOUNCEMENTS_PATH =
+            CONFIG_DIR.resolve(
+                    "announcements.json"
+            );
+
+    private static final Path SCHEDULED_COMMANDS_PATH =
+            CONFIG_DIR.resolve(
+                    "scheduled_commands.json"
+            );
+
+    private static final Path PLAYER_MESSAGES_PATH =
+            CONFIG_DIR.resolve(
+                    "player_messages.json"
+            );
+
+    private static final Path RESTART_PATH =
+            CONFIG_DIR.resolve(
+                    "restart.json"
+            );
+
+    private static final Path MAINTENANCE_PATH =
+            CONFIG_DIR.resolve(
+                    "maintenance.json"
+            );
+
+    /*
+     * The currently active configuration.
+     *
+     * The individual JSON files are loaded and combined into this
+     * object so the rest of Server Signals can continue using:
+     *
+     * ConfigManager.getConfig()
+     */
     private static ServerSignalsConfig config =
             new ServerSignalsConfig();
+
+    private static String lastError =
+            "";
+
+    public static String getLastError() {
+        return lastError;
+    }
+
+    private static final Set<String> VALID_DELIVERY_MODES =
+            Set.of(
+                    "chat",
+                    "action_bar",
+                    "title",
+                    "subtitle",
+                    "boss_bar"
+            );
+
+    private static final Set<String> VALID_TEXT_COLORS =
+            Set.of(
+                    "black",
+                    "dark_blue",
+                    "dark_green",
+                    "dark_aqua",
+                    "dark_red",
+                    "dark_purple",
+                    "gold",
+                    "gray",
+                    "dark_gray",
+                    "blue",
+                    "green",
+                    "aqua",
+                    "red",
+                    "light_purple",
+                    "yellow",
+                    "white"
+            );
 
     private ConfigManager() {
         // Utility class
     }
 
+    /**
+     * Returns the currently active configuration.
+     */
     public static ServerSignalsConfig getConfig() {
         return config;
     }
 
+    /**
+     * Loads all Server Signals configuration files.
+     *
+     * The active config is only replaced after every file has
+     * successfully loaded and passed validation.
+     *
+     * If something fails, the previous valid config remains active.
+     */
     public static boolean load() {
-        try {
-            Files.createDirectories(CONFIG_PATH.getParent());
 
-            if (Files.notExists(CONFIG_PATH)) {
-                config = new ServerSignalsConfig();
-                save();
-
-                ServerSignals.LOGGER.info(
-                        "Created default config at {}",
-                        CONFIG_PATH
+        ServerSignalsConfig loadedConfig =
+                readAndValidateConfig(
+                        true
                 );
 
-                return true;
-            }
-
-            ServerSignalsConfig loadedConfig;
-
-            try (Reader reader = Files.newBufferedReader(
-                    CONFIG_PATH,
-                    StandardCharsets.UTF_8
-            )) {
-                loadedConfig = GSON.fromJson(
-                        reader,
-                        ServerSignalsConfig.class
-                );
-            }
-
-            validate(loadedConfig);
-
-            // Replace the active config only after validation succeeds.
-            config = loadedConfig;
-
-            ServerSignals.LOGGER.info(
-                    "Loaded {} announcements from {}",
-                    config.announcements.size(),
-                    CONFIG_PATH
-            );
-
-            return true;
-
-        } catch (IOException | JsonParseException exception) {
-            ServerSignals.LOGGER.error(
-                    "Could not load Server Signals config. " +
-                            "Keeping the previous configuration.",
-                    exception
-            );
-
+        if (loadedConfig == null) {
             return false;
         }
+
+        /*
+         * Apply only after everything has passed.
+         */
+        config =
+                loadedConfig;
+
+        ServerSignals.LOGGER.info(
+                "Loaded Server Signals configuration."
+        );
+
+        ServerSignals.LOGGER.info(
+                "Loaded {} announcement(s).",
+                config.announcements.size()
+        );
+
+        ServerSignals.LOGGER.info(
+                "Loaded {} scheduled command task(s).",
+                config.scheduledCommands.size()
+        );
+
+        return true;
     }
 
-    private static void save() throws IOException {
-        try (Writer writer = Files.newBufferedWriter(
-                CONFIG_PATH,
-                StandardCharsets.UTF_8
-        )) {
-            GSON.toJson(config, writer);
-        }
+    public static boolean validateOnly() {
+
+        /*
+         * false means:
+         *
+         * - don't create missing files
+         * - don't write anything
+         * - don't replace the active config
+         */
+        return readAndValidateConfig(
+                false
+        ) != null;
     }
 
-    private static void validate(
-            ServerSignalsConfig loadedConfig
+    private static ServerSignalsConfig readAndValidateConfig(
+            boolean createMissing
     ) {
-        if (loadedConfig == null) {
-            throw new JsonParseException(
-                    "The config file is empty."
-            );
-        }
 
-        if (loadedConfig.announcements == null ||
-                loadedConfig.announcements.isEmpty()) {
-            throw new JsonParseException(
-                    "The announcements list cannot be empty."
-            );
-        }
+        lastError =
+                "";
 
-        Set<String> usedIds = new HashSet<>();
+        try {
 
-        for (int index = 0;
-             index < loadedConfig.announcements.size();
-             index++) {
+            if (createMissing) {
 
-            AnnouncementConfig announcement =
-                    loadedConfig.announcements.get(index);
-
-            if (announcement == null) {
-                throw new JsonParseException(
-                        "Announcement at index " + index + " is null."
+                Files.createDirectories(
+                        CONFIG_DIR
                 );
+
+            } else if (Files.notExists(
+                    CONFIG_DIR
+            )) {
+
+                lastError =
+                        "ServerSignals config directory does not exist.";
+
+                logLoadFailure();
+
+                return null;
             }
 
-            if (announcement.id == null ||
-                    announcement.id.isBlank()) {
-                throw new JsonParseException(
-                        "Announcement at index " + index +
-                                " has no ID."
-                );
+
+            /*
+             * =====================================================
+             * LOAD FILES
+             * =====================================================
+             */
+
+
+            AnnouncementsFileConfig announcementsFile;
+
+            try {
+
+                announcementsFile =
+                        loadConfigFile(
+                                ANNOUNCEMENTS_PATH,
+                                AnnouncementsFileConfig.class,
+                                AnnouncementsFileConfig::new,
+                                createMissing
+                        );
+
+            } catch (IOException | JsonParseException exception) {
+
+                lastError =
+                        formatFileError(
+                                ANNOUNCEMENTS_PATH,
+                                exception
+                        );
+
+                logLoadFailure();
+
+                return null;
             }
 
-            if (!announcement.id.matches("[a-z0-9_-]+")) {
-                throw new JsonParseException(
-                        "Invalid announcement ID: " +
-                                announcement.id +
-                                ". Use lowercase letters, numbers, " +
-                                "underscores and hyphens only."
-                );
+
+            ScheduledCommandsFileConfig scheduledCommandsFile;
+
+            try {
+
+                scheduledCommandsFile =
+                        loadConfigFile(
+                                SCHEDULED_COMMANDS_PATH,
+                                ScheduledCommandsFileConfig.class,
+                                ScheduledCommandsFileConfig::new,
+                                createMissing
+                        );
+
+            } catch (IOException | JsonParseException exception) {
+
+                lastError =
+                        formatFileError(
+                                SCHEDULED_COMMANDS_PATH,
+                                exception
+                        );
+
+                logLoadFailure();
+
+                return null;
             }
 
-            if (!usedIds.add(announcement.id)) {
-                throw new JsonParseException(
-                        "Duplicate announcement ID: " +
-                                announcement.id
-                );
+
+            PlayerMessagesConfig playerMessages;
+
+            try {
+
+                playerMessages =
+                        loadConfigFile(
+                                PLAYER_MESSAGES_PATH,
+                                PlayerMessagesConfig.class,
+                                PlayerMessagesConfig::new,
+                                createMissing
+                        );
+
+            } catch (IOException | JsonParseException exception) {
+
+                lastError =
+                        formatFileError(
+                                PLAYER_MESSAGES_PATH,
+                                exception
+                        );
+
+                logLoadFailure();
+
+                return null;
             }
 
-            if (announcement.sections == null ||
-                    announcement.sections.isEmpty()) {
-                throw new JsonParseException(
-                        "Announcement '" +
-                                announcement.id +
-                                "' must contain at least one section."
-                );
+
+            RestartConfig restart;
+
+            try {
+
+                restart =
+                        loadConfigFile(
+                                RESTART_PATH,
+                                RestartConfig.class,
+                                RestartConfig::new,
+                                createMissing
+                        );
+
+            } catch (IOException | JsonParseException exception) {
+
+                lastError =
+                        formatFileError(
+                                RESTART_PATH,
+                                exception
+                        );
+
+                logLoadFailure();
+
+                return null;
             }
 
-            for (int sectionIndex = 0;
-                 sectionIndex < announcement.sections.size();
-                 sectionIndex++) {
 
-                AnnouncementSectionConfig section =
-                        announcement.sections.get(sectionIndex);
+            MaintenanceConfig maintenance;
 
-                if (section == null) {
-                    throw new JsonParseException(
-                            "Announcement '" +
-                                    announcement.id +
-                                    "' has a null section at position " +
-                                    (sectionIndex + 1) +
-                                    "."
-                    );
-                }
+            try {
 
-                if (section.text == null ||
-                        section.text.isEmpty()) {
-                    throw new JsonParseException(
-                            "Announcement '" +
-                                    announcement.id +
-                                    "' section " +
-                                    (sectionIndex + 1) +
-                                    " has no text."
-                    );
-                }
+                maintenance =
+                        loadConfigFile(
+                                MAINTENANCE_PATH,
+                                MaintenanceConfig.class,
+                                MaintenanceConfig::new,
+                                createMissing
+                        );
 
-                validateSectionStyle(
-                        announcement.id,
-                        sectionIndex,
-                        section
+            } catch (IOException | JsonParseException exception) {
+
+                lastError =
+                        formatFileError(
+                                MAINTENANCE_PATH,
+                                exception
+                        );
+
+                logLoadFailure();
+
+                return null;
+            }
+
+
+            /*
+             * =====================================================
+             * ASSEMBLE CONFIG
+             * =====================================================
+             */
+
+            ServerSignalsConfig loadedConfig =
+                    new ServerSignalsConfig();
+
+            loadedConfig.announcements =
+                    announcementsFile.announcements;
+
+            loadedConfig.scheduledCommands =
+                    scheduledCommandsFile.scheduledCommands;
+
+            loadedConfig.playerMessages =
+                    playerMessages;
+
+            loadedConfig.restart =
+                    restart;
+
+            loadedConfig.maintenance =
+                    maintenance;
+
+
+            /*
+             * =====================================================
+             * VALIDATE FILES
+             * =====================================================
+             */
+
+
+            try {
+
+                validateAnnouncements(
+                        loadedConfig.announcements
                 );
-                validateDelivery(announcement);
-                validateBossBar(announcement);
 
-                if (loadedConfig.scheduledCommands == null) {
-                    loadedConfig.scheduledCommands =
-                            new ArrayList<>();
-                }
+            } catch (IllegalArgumentException exception) {
+
+                lastError =
+                        "announcements.json\n" +
+                                exception.getMessage();
+
+                logLoadFailure();
+
+                return null;
+            }
+
+
+            try {
 
                 validateScheduledCommands(
                         loadedConfig.scheduledCommands
                 );
 
-                if (loadedConfig.playerMessages == null) {
-                    loadedConfig.playerMessages =
-                            new PlayerMessagesConfig();
-                }
+            } catch (IllegalArgumentException exception) {
+
+                lastError =
+                        "scheduled_commands.json\n" +
+                                exception.getMessage();
+
+                logLoadFailure();
+
+                return null;
+            }
+
+
+            try {
 
                 validatePlayerMessages(
                         loadedConfig.playerMessages
                 );
 
-                if (loadedConfig.restart == null) {
-                    loadedConfig.restart =
-                            new RestartConfig();
-                }
+            } catch (IllegalArgumentException exception) {
 
-                validateRestart(loadedConfig.restart);
+                lastError =
+                        "player_messages.json\n" +
+                                exception.getMessage();
 
-                if (loadedConfig.maintenance == null) {
-                    loadedConfig.maintenance =
-                            new MaintenanceConfig();
-                }
+                logLoadFailure();
+
+                return null;
+            }
+
+
+            try {
+
+                validateRestart(
+                        loadedConfig.restart
+                );
+
+            } catch (IllegalArgumentException exception) {
+
+                lastError =
+                        "restart.json\n" +
+                                exception.getMessage();
+
+                logLoadFailure();
+
+                return null;
+            }
+
+
+            try {
 
                 validateMaintenance(
                         loadedConfig.maintenance
                 );
 
+            } catch (IllegalArgumentException exception) {
 
+                lastError =
+                        "maintenance.json\n" +
+                                exception.getMessage();
+
+                logLoadFailure();
+
+                return null;
             }
+
+
+            /*
+             * Everything is valid.
+             *
+             * IMPORTANT:
+             * Nothing has been applied here.
+             */
+            return loadedConfig;
+
+        } catch (IOException exception) {
+
+            lastError =
+                    "Could not access the Server Signals config directory.\n" +
+                            cleanErrorMessage(
+                                    exception
+                            );
+
+            logLoadFailure();
+
+            return null;
         }
     }
 
     private static void validateMaintenance(
-            MaintenanceConfig maintenance
+            MaintenanceConfig config
     ) {
-        if (maintenance.reason == null ||
-                maintenance.reason.isBlank()) {
-
-            maintenance.reason =
-                    "The server is currently undergoing maintenance.";
-        }
-
-        if (maintenance.allowedPlayers == null) {
-            maintenance.allowedPlayers =
-                    new ArrayList<>();
-        }
-
-        maintenance.allowedPlayers.removeIf(
-                player ->
-                        player == null ||
-                                player.isBlank()
-        );
-
-        for (int index = 0;
-             index < maintenance.allowedPlayers.size();
-             index++) {
-
-            maintenance.allowedPlayers.set(
-                    index,
-                    maintenance.allowedPlayers
-                            .get(index)
-                            .trim()
+        if (config == null) {
+            throw new IllegalArgumentException(
+                    "Maintenance configuration is missing."
             );
         }
 
-        if (maintenance.disconnectSections == null ||
-                maintenance.disconnectSections.isEmpty()) {
+        if (config.reason == null ||
+                config.reason.isBlank()) {
 
-            throw new JsonParseException(
-                    "Maintenance mode must contain " +
-                            "at least one disconnect section."
+            throw new IllegalArgumentException(
+                    "reason cannot be empty."
             );
         }
 
-        for (int index = 0;
-             index < maintenance.disconnectSections.size();
-             index++) {
+        if (config.allowedPlayers == null) {
+            throw new IllegalArgumentException(
+                    "allowedPlayers is missing."
+            );
+        }
 
-            AnnouncementSectionConfig section =
-                    maintenance.disconnectSections.get(index);
+        for (String allowedPlayer :
+                config.allowedPlayers) {
 
-            if (section == null ||
-                    section.text == null ||
-                    section.text.isEmpty()) {
+            if (allowedPlayer == null ||
+                    allowedPlayer.isBlank()) {
 
-                throw new JsonParseException(
-                        "Maintenance disconnect section " +
-                                (index + 1) +
-                                " has no text."
+                throw new IllegalArgumentException(
+                        "allowedPlayers contains an empty value."
                 );
             }
+        }
 
-            validateSectionStyle(
-                    "maintenance",
-                    index,
-                    section
+        if (config.disconnectSections == null ||
+                config.disconnectSections.isEmpty()) {
+
+            throw new IllegalArgumentException(
+                    "disconnectSections must contain at least one section."
             );
         }
 
-        if (maintenance.schedule == null) {
-            maintenance.schedule =
-                    new MaintenanceScheduleConfig();
-        }
+        validateSections(
+                config.disconnectSections,
+                "Maintenance disconnect message"
+        );
 
         validateMaintenanceSchedule(
-                maintenance.schedule
+                config.schedule
         );
     }
 
     private static void validateMaintenanceSchedule(
             MaintenanceScheduleConfig schedule
     ) {
-        DeliveryMode deliveryMode;
-
-        try {
-            deliveryMode =
-                    DeliveryMode.fromConfig(
-                            schedule.warningDelivery
-                    );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Maintenance schedule warningDelivery must be " +
-                            "chat, action_bar, title or subtitle."
+        if (schedule == null) {
+            throw new IllegalArgumentException(
+                    "schedule configuration is missing."
             );
         }
 
-        if (deliveryMode == DeliveryMode.BOSS_BAR) {
-            throw new JsonParseException(
-                    "Maintenance schedule warningDelivery cannot " +
-                            "be boss_bar. Use the separate bossBar settings."
+        if (schedule.warningDelivery == null ||
+                schedule.warningDelivery.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "schedule.warningDelivery cannot be empty."
             );
         }
 
-        schedule.warningDelivery =
-                deliveryMode.getConfigName();
+        String delivery =
+                schedule.warningDelivery
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
 
-        validateMaintenanceWarningTimes(schedule);
-        validateMaintenanceScheduleSections(schedule);
+        if (!Set.of(
+                "chat",
+                "action_bar",
+                "title",
+                "subtitle"
+        ).contains(delivery)) {
 
-        if (schedule.titleTiming == null) {
-            schedule.titleTiming =
-                    new TitleTimingConfig();
-        }
-
-        validateTitleTiming(
-                "maintenance schedule",
-                schedule.titleTiming
-        );
-
-        if (schedule.bossBar == null) {
-            schedule.bossBar =
-                    new MaintenanceBossBarConfig();
-        }
-
-        try {
-            BossBarValueParser.parseColor(
-                    schedule.bossBar.color
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Maintenance schedule boss-bar colour is invalid: " +
-                            exception.getMessage()
+            throw new IllegalArgumentException(
+                    "Invalid schedule.warningDelivery '" +
+                            schedule.warningDelivery +
+                            "'."
             );
         }
 
-        try {
-            BossBarValueParser.parseStyle(
-                    schedule.bossBar.style
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Maintenance schedule boss-bar style is invalid: " +
-                            exception.getMessage()
-            );
-        }
-    }
-
-    private static void validateMaintenanceWarningTimes(
-            MaintenanceScheduleConfig schedule
-    ) {
         if (schedule.warningTimes == null) {
-            schedule.warningTimes =
-                    new ArrayList<>();
-
-            return;
+            throw new IllegalArgumentException(
+                    "schedule.warningTimes is missing."
+            );
         }
 
-        Set<Long> usedTimes =
+        Set<Long> warningSeconds =
                 new HashSet<>();
 
-        List<String> normalized =
-                new ArrayList<>();
-
-        for (String warning :
+        for (String warningTime :
                 schedule.warningTimes) {
+
+            if (warningTime == null ||
+                    warningTime.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "schedule.warningTimes contains an empty value."
+                );
+            }
 
             long seconds;
 
             try {
                 seconds =
-                        DurationParser.toSeconds(warning);
+                        DurationParser.toSeconds(
+                                warningTime
+                        );
             } catch (IllegalArgumentException exception) {
-                throw new JsonParseException(
-                        "Invalid maintenance warning time: " +
-                                exception.getMessage()
+
+                throw new IllegalArgumentException(
+                        "Invalid maintenance warning time '" +
+                                warningTime +
+                                "'."
                 );
             }
 
-            if (!usedTimes.add(seconds)) {
-                continue;
-            }
+            if (!warningSeconds.add(
+                    seconds
+            )) {
 
-            normalized.add(
-                    warning.trim()
-                            .toLowerCase(Locale.ROOT)
-            );
+                throw new IllegalArgumentException(
+                        "Duplicate maintenance warning time '" +
+                                warningTime +
+                                "'."
+                );
+            }
         }
 
-        schedule.warningTimes =
-                normalized;
-    }
-
-    private static void validateMaintenanceScheduleSections(
-            MaintenanceScheduleConfig schedule
-    ) {
         if (schedule.sections == null ||
                 schedule.sections.isEmpty()) {
 
-            throw new JsonParseException(
-                    "Maintenance schedule must contain " +
-                            "at least one message section."
+            throw new IllegalArgumentException(
+                    "schedule.sections must contain at least one section."
             );
         }
 
-        for (int index = 0;
-             index < schedule.sections.size();
-             index++) {
+        validateSections(
+                schedule.sections,
+                "Maintenance warning"
+        );
 
-            AnnouncementSectionConfig section =
-                    schedule.sections.get(index);
+        validateTitleTiming(
+                schedule.titleTiming,
+                "Maintenance schedule"
+        );
 
-            if (section == null ||
-                    section.text == null ||
-                    section.text.isEmpty()) {
+        validateMaintenanceBossBar(
+                schedule.bossBar
+        );
+    }
 
-                throw new JsonParseException(
-                        "Maintenance schedule section " +
-                                (index + 1) +
-                                " has no text."
-                );
-            }
+    private static void validateMaintenanceBossBar(
+            MaintenanceBossBarConfig bossBar
+    ) {
+        if (bossBar == null) {
+            throw new IllegalArgumentException(
+                    "schedule.bossBar configuration is missing."
+            );
+        }
 
-            validateSectionStyle(
-                    "maintenance schedule",
-                    index,
-                    section
+        if (bossBar.color == null ||
+                bossBar.color.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "schedule.bossBar.color cannot be empty."
+            );
+        }
+
+        String color =
+                bossBar.color
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "pink",
+                "blue",
+                "red",
+                "green",
+                "yellow",
+                "purple",
+                "white"
+        ).contains(color)) {
+
+            throw new IllegalArgumentException(
+                    "Invalid schedule.bossBar color '" +
+                            bossBar.color +
+                            "'."
+            );
+        }
+
+        if (bossBar.style == null ||
+                bossBar.style.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "schedule.bossBar.style cannot be empty."
+            );
+        }
+
+        String style =
+                bossBar.style
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "progress",
+                "notched_6",
+                "notched_10",
+                "notched_12",
+                "notched_20"
+        ).contains(style)) {
+
+            throw new IllegalArgumentException(
+                    "Invalid schedule.bossBar style '" +
+                            bossBar.style +
+                            "'."
             );
         }
     }
 
     private static void validateRestart(
-            RestartConfig restart
+            RestartConfig config
     ) {
-        if (restart.finalCommand == null ||
-                restart.finalCommand.isBlank()) {
-
-            throw new JsonParseException(
-                    "Restart finalCommand cannot be empty."
+        if (config == null) {
+            throw new IllegalArgumentException(
+                    "Restart configuration is missing."
             );
         }
 
-        if (restart.finalCommand.contains("\n") ||
-                restart.finalCommand.contains("\r")) {
+        if (config.finalCommand == null ||
+                config.finalCommand.isBlank()) {
 
-            throw new JsonParseException(
-                    "Restart finalCommand must be on one line."
+            throw new IllegalArgumentException(
+                    "finalCommand cannot be empty."
             );
         }
 
-        restart.finalCommand =
-                restart.finalCommand.trim();
+        if (config.warningDelivery == null ||
+                config.warningDelivery.isBlank()) {
 
-        validateRestartDelivery(restart);
-        validateRestartWarnings(restart);
-        validateRestartSections(restart);
-        validateRestartBossBar(restart);
-
-        if (restart.titleTiming == null) {
-            restart.titleTiming =
-                    new TitleTimingConfig();
+            throw new IllegalArgumentException(
+                    "warningDelivery cannot be empty."
+            );
         }
+
+        String delivery =
+                config.warningDelivery
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "chat",
+                "action_bar",
+                "title",
+                "subtitle"
+        ).contains(delivery)) {
+
+            throw new IllegalArgumentException(
+                    "Invalid warningDelivery '" +
+                            config.warningDelivery +
+                            "'."
+            );
+        }
+
+        if (config.warningTimes == null) {
+            throw new IllegalArgumentException(
+                    "warningTimes is missing."
+            );
+        }
+
+        Set<Long> warningSeconds =
+                new HashSet<>();
+
+        for (String warningTime :
+                config.warningTimes) {
+
+            if (warningTime == null ||
+                    warningTime.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "warningTimes contains an empty value."
+                );
+            }
+
+            long seconds;
+
+            try {
+                seconds =
+                        DurationParser.toSeconds(
+                                warningTime
+                        );
+            } catch (IllegalArgumentException exception) {
+
+                throw new IllegalArgumentException(
+                        "Invalid warning time '" +
+                                warningTime +
+                                "'."
+                );
+            }
+
+            if (!warningSeconds.add(
+                    seconds
+            )) {
+                throw new IllegalArgumentException(
+                        "Duplicate warning time '" +
+                                warningTime +
+                                "'."
+                );
+            }
+        }
+
+        if (config.sections == null ||
+                config.sections.isEmpty()) {
+
+            throw new IllegalArgumentException(
+                    "Restart message must contain at least one section."
+            );
+        }
+
+        validateSections(
+                config.sections,
+                "Restart message"
+        );
 
         validateTitleTiming(
-                "restart",
-                restart.titleTiming
+                config.titleTiming,
+                "Restart"
+        );
+
+        validateRestartBossBar(
+                config.bossBar
         );
     }
 
-    private static void validateRestartDelivery(
-            RestartConfig restart
-    ) {
-        DeliveryMode mode;
-
-        try {
-            mode = DeliveryMode.fromConfig(
-                    restart.warningDelivery
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Restart warningDelivery must be chat, " +
-                            "action_bar, title or subtitle."
-            );
-        }
-
-        if (mode == DeliveryMode.BOSS_BAR) {
-            throw new JsonParseException(
-                    "Restart warningDelivery cannot be boss_bar. " +
-                            "Use the separate restart bossBar setting."
-            );
-        }
-
-        restart.warningDelivery =
-                mode.getConfigName();
-    }
-
-    private static void validateRestartWarnings(
-            RestartConfig restart
-    ) {
-        if (restart.warningTimes == null) {
-            restart.warningTimes =
-                    new ArrayList<>();
-
-            return;
-        }
-
-        Set<Long> usedSeconds =
-                new HashSet<>();
-
-        List<String> normalizedWarnings =
-                new ArrayList<>();
-
-        for (int index = 0;
-             index < restart.warningTimes.size();
-             index++) {
-
-            String warning =
-                    restart.warningTimes.get(index);
-
-            long warningSeconds;
-
-            try {
-                warningSeconds =
-                        DurationParser.toSeconds(warning);
-            } catch (IllegalArgumentException exception) {
-                throw new JsonParseException(
-                        "Restart warning time " +
-                                (index + 1) +
-                                " is invalid: " +
-                                exception.getMessage()
-                );
-            }
-
-            if (!usedSeconds.add(warningSeconds)) {
-                continue;
-            }
-
-            normalizedWarnings.add(
-                    warning.trim()
-                            .toLowerCase(Locale.ROOT)
-            );
-        }
-
-        restart.warningTimes =
-                normalizedWarnings;
-    }
-
-    private static void validateRestartSections(
-            RestartConfig restart
-    ) {
-        if (restart.sections == null ||
-                restart.sections.isEmpty()) {
-
-            throw new JsonParseException(
-                    "Restart messages must contain " +
-                            "at least one section."
-            );
-        }
-
-        for (int index = 0;
-             index < restart.sections.size();
-             index++) {
-
-            AnnouncementSectionConfig section =
-                    restart.sections.get(index);
-
-            if (section == null ||
-                    section.text == null ||
-                    section.text.isEmpty()) {
-
-                throw new JsonParseException(
-                        "Restart message section " +
-                                (index + 1) +
-                                " has no text."
-                );
-            }
-
-            validateSectionStyle(
-                    "restart",
-                    index,
-                    section
-            );
-        }
-    }
-
     private static void validateRestartBossBar(
-            RestartConfig restart
+            RestartBossBarConfig bossBar
     ) {
-        if (restart.bossBar == null) {
-            restart.bossBar =
-                    new RestartBossBarConfig();
-        }
-
-        try {
-            BossBarValueParser.parseColor(
-                    restart.bossBar.color
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Restart boss-bar colour is invalid: " +
-                            exception.getMessage()
+        if (bossBar == null) {
+            throw new IllegalArgumentException(
+                    "bossBar configuration is missing."
             );
         }
 
-        try {
-            BossBarValueParser.parseStyle(
-                    restart.bossBar.style
+        if (bossBar.color == null ||
+                bossBar.color.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "bossBar color cannot be empty."
             );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Restart boss-bar style is invalid: " +
-                            exception.getMessage()
+        }
+
+        String color =
+                bossBar.color
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "pink",
+                "blue",
+                "red",
+                "green",
+                "yellow",
+                "purple",
+                "white"
+        ).contains(color)) {
+
+            throw new IllegalArgumentException(
+                    "Invalid bossBar color '" +
+                            bossBar.color +
+                            "'."
+            );
+        }
+
+        if (bossBar.style == null ||
+                bossBar.style.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "bossBar style cannot be empty."
+            );
+        }
+
+        String style =
+                bossBar.style
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "progress",
+                "notched_6",
+                "notched_10",
+                "notched_12",
+                "notched_20"
+        ).contains(style)) {
+
+            throw new IllegalArgumentException(
+                    "Invalid bossBar style '" +
+                            bossBar.style +
+                            "'."
             );
         }
     }
 
     private static void validatePlayerMessages(
-            PlayerMessagesConfig playerMessages
+            PlayerMessagesConfig config
     ) {
+        if (config == null) {
+            throw new IllegalArgumentException(
+                    "Player messages configuration is missing."
+            );
+        }
+
         validatePlayerMessage(
-                "join",
-                playerMessages.join
+                config.join,
+                "join"
         );
 
         validatePlayerMessage(
-                "first_join",
-                playerMessages.firstJoin
+                config.firstJoin,
+                "firstJoin"
         );
 
         validatePlayerMessage(
-                "leave",
-                playerMessages.leave
+                config.leave,
+                "leave"
         );
     }
 
     private static void validatePlayerMessage(
-            String messageId,
-            PlayerMessageConfig message
+            PlayerMessageConfig message,
+            String name
     ) {
         if (message == null) {
-            throw new JsonParseException(
+            throw new IllegalArgumentException(
                     "Player message '" +
-                            messageId +
-                            "' cannot be null."
+                            name +
+                            "' is missing."
+            );
+        }
+
+        if (message.delivery == null ||
+                message.delivery.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "Player message '" +
+                            name +
+                            "' is missing a delivery mode."
+            );
+        }
+
+        String delivery =
+                message.delivery
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "chat",
+                "action_bar",
+                "title",
+                "subtitle"
+        ).contains(delivery)) {
+
+            throw new IllegalArgumentException(
+                    "Player message '" +
+                            name +
+                            "' has invalid delivery mode '" +
+                            message.delivery +
+                            "'."
+            );
+        }
+
+        if (message.audience == null ||
+                message.audience.isBlank()) {
+
+            throw new IllegalArgumentException(
+                    "Player message '" +
+                            name +
+                            "' is missing an audience."
+            );
+        }
+
+        String audience =
+                message.audience
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!Set.of(
+                "broadcast",
+                "player_only"
+        ).contains(audience)) {
+
+            throw new IllegalArgumentException(
+                    "Player message '" +
+                            name +
+                            "' has invalid audience '" +
+                            message.audience +
+                            "'."
             );
         }
 
         if (message.sections == null ||
                 message.sections.isEmpty()) {
 
-            throw new JsonParseException(
+            throw new IllegalArgumentException(
                     "Player message '" +
-                            messageId +
+                            name +
                             "' must contain at least one section."
             );
         }
 
-        for (int index = 0;
-             index < message.sections.size();
-             index++) {
-
-            AnnouncementSectionConfig section =
-                    message.sections.get(index);
-
-            if (section == null ||
-                    section.text == null ||
-                    section.text.isEmpty()) {
-
-                throw new JsonParseException(
-                        "Player message '" +
-                                messageId +
-                                "' section " +
-                                (index + 1) +
-                                " has no text."
-                );
-            }
-
-            validateSectionStyle(
-                    "player message " + messageId,
-                    index,
-                    section
-            );
-        }
-
-        DeliveryMode deliveryMode;
-
-        try {
-            deliveryMode =
-                    DeliveryMode.fromConfig(
-                            message.delivery
-                    );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Player message '" +
-                            messageId +
-                            "' has an invalid delivery mode."
-            );
-        }
-
-        if (deliveryMode == DeliveryMode.BOSS_BAR) {
-            throw new JsonParseException(
-                    "Player message '" +
-                            messageId +
-                            "' cannot use boss_bar yet. " +
-                            "Use chat, action_bar, title or subtitle."
-            );
-        }
-
-        message.delivery =
-                deliveryMode.getConfigName();
-
-        try {
-            message.audience =
-                    PlayerMessageAudience
-                            .fromConfig(message.audience)
-                            .getConfigName();
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Player message '" +
-                            messageId +
-                            "' has an invalid audience. " +
-                            "Expected broadcast or player_only."
-            );
-        }
-
-        if (message.titleTiming == null) {
-            message.titleTiming =
-                    new TitleTimingConfig();
-        }
-
-        validateTitleTiming(
-                "player message " + messageId,
-                message.titleTiming
+        validateSections(
+                message.sections,
+                "Player message '" +
+                        name +
+                        "'"
         );
-    }
-
-    private static void validateScheduledCommands(
-            List<ScheduledCommandConfig> tasks
-    ) {
-        Set<String> usedIds = new HashSet<>();
-
-        for (int taskIndex = 0;
-             taskIndex < tasks.size();
-             taskIndex++) {
-
-            ScheduledCommandConfig task =
-                    tasks.get(taskIndex);
-
-            if (task == null) {
-                throw new JsonParseException(
-                        "Scheduled command task at index " +
-                                taskIndex +
-                                " is null."
-                );
-            }
-
-            if (task.id == null ||
-                    task.id.isBlank()) {
-                throw new JsonParseException(
-                        "Scheduled command task at index " +
-                                taskIndex +
-                                " has no ID."
-                );
-            }
-
-            if (!task.id.matches("[a-z0-9_-]+")) {
-                throw new JsonParseException(
-                        "Invalid scheduled command ID: " +
-                                task.id +
-                                ". Use lowercase letters, numbers, " +
-                                "underscores and hyphens only."
-                );
-            }
-
-            if (!usedIds.add(task.id)) {
-                throw new JsonParseException(
-                        "Duplicate scheduled command ID: " +
-                                task.id
-                );
-            }
-
-            if (task.commands == null ||
-                    task.commands.isEmpty()) {
-                throw new JsonParseException(
-                        "Scheduled command task '" +
-                                task.id +
-                                "' must contain at least one command."
-                );
-            }
-
-            for (int commandIndex = 0;
-                 commandIndex < task.commands.size();
-                 commandIndex++) {
-
-                String command =
-                        task.commands.get(commandIndex);
-
-                if (command == null ||
-                        command.isBlank()) {
-                    throw new JsonParseException(
-                            "Scheduled command task '" +
-                                    task.id +
-                                    "' contains an empty command " +
-                                    "at position " +
-                                    (commandIndex + 1) +
-                                    "."
-                    );
-                }
-
-                if (command.contains("\n") ||
-                        command.contains("\r")) {
-                    throw new JsonParseException(
-                            "Scheduled command task '" +
-                                    task.id +
-                                    "' command " +
-                                    (commandIndex + 1) +
-                                    " must be on one line."
-                    );
-                }
-
-                task.commands.set(
-                        commandIndex,
-                        command.trim()
-                );
-            }
-
-            try {
-                DurationParser.toTicks(task.interval);
-            } catch (IllegalArgumentException exception) {
-                throw new JsonParseException(
-                        "Scheduled command task '" +
-                                task.id +
-                                "' has an invalid interval: " +
-                                exception.getMessage()
-                );
-            }
-        }
-    }
-
-    private static void validateBossBar(
-            AnnouncementConfig announcement
-    ) {
-        if (announcement.bossBar == null) {
-            announcement.bossBar =
-                    new BossBarConfig();
-        }
-
-        try {
-            BossBarValueParser.parseColor(
-                    announcement.bossBar.color
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcement.id +
-                            "' has an invalid boss-bar colour: " +
-                            announcement.bossBar.color +
-                            ". " +
-                            exception.getMessage()
-            );
-        }
-
-        try {
-            BossBarValueParser.parseStyle(
-                    announcement.bossBar.style
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcement.id +
-                            "' has an invalid boss-bar style: " +
-                            announcement.bossBar.style +
-                            ". " +
-                            exception.getMessage()
-            );
-        }
-
-        try {
-            DurationParser.toTicks(
-                    announcement.bossBar.duration
-            );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcement.id +
-                            "' has an invalid boss-bar duration: " +
-                            exception.getMessage()
-            );
-        }
-    }
-
-    private static void validateDelivery(
-            AnnouncementConfig announcement
-    ) {
-        DeliveryMode deliveryMode;
-
-        try {
-            deliveryMode =
-                    DeliveryMode.fromConfig(
-                            announcement.delivery
-                    );
-        } catch (IllegalArgumentException exception) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcement.id +
-                            "' has an invalid delivery mode: " +
-                            announcement.delivery +
-                            ". Expected chat, action_bar, title, " +
-                            "subtitle or boss_bar."
-            );
-        }
-
-        announcement.delivery =
-                deliveryMode.getConfigName();
-
-        if (announcement.titleTiming == null) {
-            announcement.titleTiming =
-                    new TitleTimingConfig();
-        }
 
         validateTitleTiming(
-                announcement.id,
-                announcement.titleTiming
+                message.titleTiming,
+                "Player message '" +
+                        name +
+                        "'"
         );
     }
 
     private static void validateTitleTiming(
-            String announcementId,
-            TitleTimingConfig timing
+            TitleTimingConfig timing,
+            String owner
     ) {
-        if (timing.fadeInTicks < 0) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcementId +
-                            "' fadeInTicks cannot be negative."
+        if (timing == null) {
+            throw new IllegalArgumentException(
+                    owner +
+                            " is missing titleTiming."
             );
         }
 
-        if (timing.stayTicks < 1) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcementId +
-                            "' stayTicks must be at least 1."
+        if (timing.fadeInTicks < 0) {
+            throw new IllegalArgumentException(
+                    owner +
+                            " fadeInTicks cannot be negative."
+            );
+        }
+
+        if (timing.stayTicks < 0) {
+            throw new IllegalArgumentException(
+                    owner +
+                            " stayTicks cannot be negative."
             );
         }
 
         if (timing.fadeOutTicks < 0) {
-            throw new JsonParseException(
-                    "Announcement '" +
-                            announcementId +
-                            "' fadeOutTicks cannot be negative."
+            throw new IllegalArgumentException(
+                    owner +
+                            " fadeOutTicks cannot be negative."
             );
         }
     }
-        private static void validateSectionStyle(
-                String announcementId,
-        int sectionIndex,
-        AnnouncementSectionConfig section
-) {
-            if (section.style == null) {
-                section.style = new AnnouncementStyleConfig();
-            }
 
-            String sectionLocation =
-                    "Announcement '" +
-                            announcementId +
-                            "' section " +
-                            (sectionIndex + 1);
-
-            validateColor(
-                    sectionLocation,
-                    section.style
-            );
-
-            validateUrl(
-                    sectionLocation,
-                    section.style.clickUrl
-            );
-        }
-
-        private static void validateColor(
-                String sectionLocation,
-                AnnouncementStyleConfig style
-) {
-            if (style.color == null ||
-                    style.color.isBlank()) {
-                style.color = "white";
-                return;
-            }
-
-            String normalized =
-                    style.color.trim()
-                            .toLowerCase(Locale.ROOT);
-
-            if (normalized.matches("#[0-9a-f]{6}")) {
-                style.color = normalized;
-                return;
-            }
-
-            Formatting formatting =
-                    Formatting.byName(normalized);
-
-            if (formatting == null ||
-                    !formatting.isColor()) {
-                throw new JsonParseException(
-                        sectionLocation +
-                                " has an invalid colour: " +
-                                style.color
-                );
-            }
-
-            style.color = normalized;
-        }
-
-        private static void validateUrl(
-                String sectionLocation,
-                String clickUrl
-) {
-            if (clickUrl == null ||
-                    clickUrl.isBlank()) {
-                return;
-            }
-
-            try {
-                URI uri = new URI(clickUrl);
-                String scheme = uri.getScheme();
-
-                boolean validScheme =
-                        "https".equalsIgnoreCase(scheme) ||
-                                "http".equalsIgnoreCase(scheme);
-
-                if (!validScheme ||
-                        uri.getHost() == null) {
-                    throw new JsonParseException(
-                            sectionLocation +
-                                    " has an invalid click URL. " +
-                                    "Only complete HTTP or HTTPS URLs are allowed."
-                    );
-                }
-
-            } catch (URISyntaxException exception) {
-                throw new JsonParseException(
-                        sectionLocation +
-                                " has an invalid click URL.",
+    private static String formatFileError(
+            Path path,
+            Exception exception
+    ) {
+        return path.getFileName() +
+                "\n" +
+                cleanErrorMessage(
                         exception
                 );
-            }
+    }
+
+    private static String cleanErrorMessage(
+            Exception exception
+    ) {
+        String message =
+                exception.getMessage();
+
+        if (message == null ||
+                message.isBlank()) {
+
+            return exception
+                    .getClass()
+                    .getSimpleName();
         }
 
-    public static boolean saveCurrent() {
-        try {
-            Files.createDirectories(
-                    CONFIG_PATH.getParent()
+        return message;
+    }
+
+    private static void logLoadFailure() {
+
+        ServerSignals.LOGGER.error(
+                "Server Signals configuration check failed: {}",
+                lastError.replace(
+                        "\n",
+                        " - "
+                )
+        );
+
+        ServerSignals.LOGGER.warn(
+                "The active Server Signals configuration was not changed."
+        );
+    }
+
+    /**
+     * Loads a configuration file.
+     *
+     * If the file does not exist, the supplied default object is
+     * written to disk first.
+     */
+    private static <T> T loadOrCreate(
+            Path path,
+            Class<T> type,
+            Supplier<T> defaultSupplier
+    ) throws IOException {
+
+        if (Files.notExists(path)) {
+
+            T defaultConfig =
+                    defaultSupplier.get();
+
+            saveFile(
+                    path,
+                    defaultConfig
             );
 
-            save();
+            ServerSignals.LOGGER.info(
+                    "Created default config file: {}",
+                    path.getFileName()
+            );
+        }
+
+        return loadFile(
+                path,
+                type
+        );
+    }
+
+    private static <T> T loadConfigFile(
+            Path path,
+            Class<T> type,
+            Supplier<T> defaultSupplier,
+            boolean createMissing
+    ) throws IOException {
+
+        if (createMissing) {
+            return loadOrCreate(
+                    path,
+                    type,
+                    defaultSupplier
+            );
+        }
+
+        /*
+         * Validation should not create or modify files.
+         */
+        if (Files.notExists(path)) {
+            throw new IOException(
+                    "File does not exist."
+            );
+        }
+
+        return loadFile(
+                path,
+                type
+        );
+    }
+
+    /**
+     * Loads one JSON file into the requested config class.
+     */
+    private static <T> T loadFile(
+            Path path,
+            Class<T> type
+    ) throws IOException {
+
+        try (Reader reader =
+                     Files.newBufferedReader(
+                             path,
+                             StandardCharsets.UTF_8
+                     )) {
+
+            T loaded =
+                    GSON.fromJson(
+                            reader,
+                            type
+                    );
+
+            if (loaded == null) {
+
+                throw new JsonParseException(
+                        path.getFileName() +
+                                " is empty."
+                );
+            }
+
+            return loaded;
+        }
+    }
+
+    /**
+     * Writes one configuration object to disk.
+     */
+    private static void saveFile(
+            Path path,
+            Object value
+    ) throws IOException {
+
+        Files.createDirectories(
+                CONFIG_DIR
+        );
+
+        try (Writer writer =
+                     Files.newBufferedWriter(
+                             path,
+                             StandardCharsets.UTF_8
+                     )) {
+
+            GSON.toJson(
+                    value,
+                    writer
+            );
+        }
+    }
+
+    /**
+     * Saves only maintenance.json.
+     *
+     * Maintenance mode changes at runtime, so we do not want
+     * enabling/disabling maintenance to rewrite every config file.
+     */
+    public static boolean saveMaintenance() {
+
+        try {
+
+            saveFile(
+                    MAINTENANCE_PATH,
+                    config.maintenance
+            );
 
             ServerSignals.LOGGER.info(
-                    "Saved Server Signals configuration to {}.",
-                    CONFIG_PATH
+                    "Saved maintenance configuration."
             );
 
             return true;
 
         } catch (IOException exception) {
+
             ServerSignals.LOGGER.error(
-                    "Could not save Server Signals configuration.",
+                    "Could not save maintenance configuration.",
                     exception
             );
 
             return false;
+        }
+    }
+
+    /**
+     * Temporary backwards compatibility.
+     *
+     * If MaintenanceManager still calls saveCurrent(), it will
+     * continue working until we replace those calls with
+     * saveMaintenance().
+     */
+    @Deprecated
+    public static boolean saveCurrent() {
+        return saveMaintenance();
+    }
+
+    /*
+     * =========================================================
+     * VALIDATION
+     * =========================================================
+     */
+
+    private static void validate(
+            ServerSignalsConfig config
+    ) {
+
+        if (config.announcements == null) {
+            throw new IllegalArgumentException(
+                    "announcements.json does not contain an announcements list."
+            );
+        }
+
+        if (config.scheduledCommands == null) {
+            throw new IllegalArgumentException(
+                    "scheduled_commands.json does not contain a scheduledCommands list."
+            );
+        }
+
+        if (config.playerMessages == null) {
+            throw new IllegalArgumentException(
+                    "player_messages.json could not be loaded."
+            );
+        }
+
+        if (config.restart == null) {
+            throw new IllegalArgumentException(
+                    "restart.json could not be loaded."
+            );
+        }
+
+        if (config.maintenance == null) {
+            throw new IllegalArgumentException(
+                    "maintenance.json could not be loaded."
+            );
+        }
+
+        validateAnnouncements(
+                config.announcements
+        );
+
+        validateScheduledCommands(
+                config.scheduledCommands
+        );
+    }
+
+    /*
+     * =========================================================
+     * ANNOUNCEMENTS
+     * =========================================================
+     */
+
+    private static void validateAnnouncements(
+            List<AnnouncementConfig> announcements
+    ) {
+
+        Set<String> ids =
+                new HashSet<>();
+
+        for (AnnouncementConfig announcement :
+                announcements) {
+
+            if (announcement == null) {
+                throw new IllegalArgumentException(
+                        "announcements.json contains a null announcement."
+                );
+            }
+
+            if (announcement.id == null ||
+                    announcement.id.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "An announcement is missing an id."
+                );
+            }
+
+            String id =
+                    announcement.id.trim();
+
+            if (!ids.add(id)) {
+
+                throw new IllegalArgumentException(
+                        "Duplicate announcement id: " +
+                                id
+                );
+            }
+
+            if (announcement.interval == null ||
+                    announcement.interval.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Announcement '" +
+                                id +
+                                "' is missing an interval."
+                );
+            }
+
+            validateDuration(
+                    announcement.interval,
+                    "Announcement '" +
+                            id +
+                            "'"
+            );
+
+            if (announcement.delivery == null ||
+                    announcement.delivery.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Announcement '" +
+                                id +
+                                "' is missing a delivery mode."
+                );
+            }
+
+            validateDeliveryMode(
+                    announcement.delivery,
+                    "Announcement '" +
+                            id +
+                            "'"
+            );
+
+            if (announcement.sections == null ||
+                    announcement.sections.isEmpty()) {
+
+                throw new IllegalArgumentException(
+                        "Announcement '" +
+                                id +
+                                "' must contain at least one section."
+                );
+            }
+
+            validateSections(
+                    announcement.sections,
+                    "Announcement '" +
+                            id +
+                            "'"
+            );
+        }
+    }
+
+    /*
+     * =========================================================
+     * SCHEDULED COMMANDS
+     * =========================================================
+     */
+
+    private static void validateScheduledCommands(
+            List<ScheduledCommandConfig> scheduledCommands
+    ) {
+
+        Set<String> ids =
+                new HashSet<>();
+
+        for (ScheduledCommandConfig scheduledCommand :
+                scheduledCommands) {
+
+            if (scheduledCommand == null) {
+
+                throw new IllegalArgumentException(
+                        "scheduled_commands.json contains a null task."
+                );
+            }
+
+            if (scheduledCommand.id == null ||
+                    scheduledCommand.id.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "A scheduled command task is missing an id."
+                );
+            }
+
+            String id =
+                    scheduledCommand.id.trim();
+
+            if (!ids.add(id)) {
+
+                throw new IllegalArgumentException(
+                        "Duplicate scheduled command id: " +
+                                id
+                );
+            }
+
+            if (scheduledCommand.interval == null ||
+                    scheduledCommand.interval.isBlank()) {
+
+                throw new IllegalArgumentException(
+                        "Scheduled command '" +
+                                id +
+                                "' is missing an interval."
+                );
+            }
+
+            validateDuration(
+                    scheduledCommand.interval,
+                    "Scheduled command '" +
+                            id +
+                            "'"
+            );
+
+            if (scheduledCommand.commands == null ||
+                    scheduledCommand.commands.isEmpty()) {
+
+                throw new IllegalArgumentException(
+                        "Scheduled command '" +
+                                id +
+                                "' must contain at least one command."
+                );
+            }
+
+            for (String command :
+                    scheduledCommand.commands) {
+
+                if (command == null ||
+                        command.isBlank()) {
+
+                    throw new IllegalArgumentException(
+                            "Scheduled command '" +
+                                    id +
+                                    "' contains an empty command."
+                    );
+                }
+            }
+        }
+    }
+
+    /*
+     * =========================================================
+     * MESSAGE SECTIONS
+     * =========================================================
+     */
+
+    private static void validateSections(
+            List<AnnouncementSectionConfig> sections,
+            String owner
+    ) {
+
+        for (int index = 0;
+             index < sections.size();
+             index++) {
+
+            AnnouncementSectionConfig section =
+                    sections.get(index);
+
+            if (section == null) {
+
+                throw new IllegalArgumentException(
+                        owner +
+                                " contains a null section at index " +
+                                index +
+                                "."
+                );
+            }
+
+            if (section.text == null) {
+
+                throw new IllegalArgumentException(
+                        owner +
+                                " section " +
+                                index +
+                                " has no text value."
+                );
+            }
+
+            if (section.style == null) {
+
+                throw new IllegalArgumentException(
+                        owner +
+                                " section " +
+                                index +
+                                " has no style object."
+                );
+            }
+
+            validateSectionStyle(
+                    section.style,
+                    owner +
+                            " section " +
+                            index
+            );
+        }
+    }
+
+    private static void validateSectionStyle(
+            AnnouncementStyleConfig style,
+            String owner
+    ) {
+
+        if (style.color == null ||
+                style.color.isBlank()) {
+
+            return;
+        }
+
+        String color =
+                style.color
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        /*
+         * Named Minecraft colour.
+         */
+        if (VALID_TEXT_COLORS.contains(
+                color
+        )) {
+            return;
+        }
+
+        /*
+         * Hex colour, for example:
+         *
+         * #FFAA00
+         */
+        if (color.matches(
+                "^#[0-9a-f]{6}$"
+        )) {
+            return;
+        }
+
+        throw new IllegalArgumentException(
+                owner +
+                        " has invalid colour '" +
+                        style.color +
+                        "'."
+        );
+    }
+
+    /*
+     * =========================================================
+     * GENERAL VALIDATION
+     * =========================================================
+     */
+
+    private static void validateDeliveryMode(
+            String delivery,
+            String owner
+    ) {
+
+        String normalized =
+                delivery
+                        .trim()
+                        .toLowerCase(
+                                Locale.ROOT
+                        );
+
+        if (!VALID_DELIVERY_MODES.contains(
+                normalized
+        )) {
+
+            throw new IllegalArgumentException(
+                    owner +
+                            " has invalid delivery mode '" +
+                            delivery +
+                            "'."
+            );
+        }
+    }
+
+    private static void validateDuration(
+            String duration,
+            String owner
+    ) {
+
+        try {
+
+            DurationParser.toSeconds(
+                    duration
+            );
+
+        } catch (IllegalArgumentException exception) {
+
+            throw new IllegalArgumentException(
+                    owner +
+                            " has invalid duration '" +
+                            duration +
+                            "'. " +
+                            exception.getMessage()
+            );
         }
     }
 }

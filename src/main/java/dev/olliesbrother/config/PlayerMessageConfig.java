@@ -4,6 +4,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 public final class PlayerMessageConfig {
+    public List<String> _comments =
+            new ArrayList<>(List.of(
+                    "Custom join, first-join and leave messages.",
+                    "Enable vanilla-message suppression when replacing Minecraft's default join or leave messages.",
+                    "Audience can be broadcast or player_only."
+            ));
+
     public boolean enabled;
 
     public String delivery = "chat";
