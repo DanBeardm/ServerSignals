@@ -14,6 +14,8 @@ import dev.olliesbrother.events.VanillaPlayerMessageSuppressor;
 
 import dev.olliesbrother.events.PlayerConnectionHandler;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,7 +27,32 @@ public final class ServerSignals implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Server Signals initializing.");
+        String version =
+                getVersion();
+
+        LOGGER.info(
+                "Loading Server Signals {}...",
+                version
+        );
+
+        boolean configLoaded =
+                ConfigManager.load();
+
+        if (configLoaded) {
+
+            ConfigManager.logStartupSummary();
+
+        } else {
+
+            LOGGER.error(
+                    "Server Signals configuration could not be loaded."
+            );
+
+            LOGGER.error(
+                    "Fix the configuration error and run " +
+                            "/serversignals reload."
+            );
+        }
 
         ConfigManager.load();
         SeenPlayerStore.load();
@@ -44,6 +71,40 @@ public final class ServerSignals implements ModInitializer {
 
         ServerSignalsCommands.register();
 
-        LOGGER.info("Server Signals initialized.");
+        ServerLifecycleEvents.SERVER_STARTED.register(
+                server -> {
+
+                    if (configLoaded) {
+
+                        LOGGER.info(
+                                "Server Signals {} ready.",
+                                version
+                        );
+
+                    } else {
+
+                        LOGGER.warn(
+                                "Server Signals {} started, but its " +
+                                        "configuration did not load successfully.",
+                                version
+                        );
+                    }
+                }
+        );
+    }
+
+    private static String getVersion() {
+
+        return FabricLoader.getInstance()
+                .getModContainer(
+                        MOD_ID
+                )
+                .map(container ->
+                        container
+                                .getMetadata()
+                                .getVersion()
+                                .getFriendlyString()
+                )
+                .orElse("unknown");
     }
 }

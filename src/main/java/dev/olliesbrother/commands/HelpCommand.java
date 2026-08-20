@@ -100,7 +100,7 @@ public final class HelpCommand {
                 source,
                 PermissionNodes.ANNOUNCEMENT_LIST,
                 2,
-                "/serversignals list",
+                "/serversignals announcement list",
                 "List configured announcements."
         );
 
@@ -108,7 +108,7 @@ public final class HelpCommand {
                 source,
                 PermissionNodes.ANNOUNCEMENT_TEST,
                 2,
-                "/serversignals test <id>",
+                "/serversignals announcement test <id>",
                 "Test an announcement immediately."
         );
 

@@ -48,14 +48,6 @@ public final class ServerSignalsCommands {
                                         //serversignals help
                                         .then(HelpCommand.build())
 
-                                        // /serversignals list
-                                        .requires(
-                                                PermissionHelper.require(
-                                                        PermissionNodes.ANNOUNCEMENT_TEST,
-                                                        2
-                                                )
-                                        )
-
                                         // /serversignals reload
                                         .then(
                                                 CommandManager.literal("reload")
@@ -72,56 +64,9 @@ public final class ServerSignalsCommands {
                                                         )
                                         )
 
-                                        // /serversignals test
-                                        // /serversignals test <id>
                                         .then(
-                                                CommandManager.literal("test")
-                                                        .requires(
-                                                                PermissionHelper.require(
-                                                                        PermissionNodes.ANNOUNCEMENT_TEST,
-                                                                        2
-                                                                )
-                                                        )
-
-                                                        // /serversignals test
-                                                        .executes(context ->
-                                                                testFirstEnabled(
-                                                                        context.getSource()
-                                                                )
-                                                        )
-
-                                                        // /serversignals test <id>
-                                                        .then(
-                                                                CommandManager.argument(
-                                                                                "id",
-                                                                                StringArgumentType.word()
-                                                                        )
-                                                                        .suggests(
-                                                                                (context, builder) ->
-                                                                                        CommandSource.suggestMatching(
-                                                                                                ConfigManager
-                                                                                                        .getConfig()
-                                                                                                        .announcements
-                                                                                                        .stream()
-                                                                                                        .map(
-                                                                                                                announcement ->
-                                                                                                                        announcement.id
-                                                                                                        ),
-                                                                                                builder
-                                                                                        )
-                                                                        )
-                                                                        .executes(context ->
-                                                                                testById(
-                                                                                        context.getSource(),
-                                                                                        StringArgumentType.getString(
-                                                                                                context,
-                                                                                                "id"
-                                                                                        )
-                                                                                )
-                                                                        )
-                                                        )
+                                                AnnouncementCommands.build()
                                         )
-
                                         .then(ScheduledCommandCommands.build())
                                         .then(PlayerMessageCommands.build())
                                         .then(RestartCommands.build())
@@ -398,38 +343,6 @@ public final class ServerSignalsCommands {
         return 1;
     }
 
-    private static int listAnnouncements(
-            ServerCommandSource source
-    ) {
-        source.sendFeedback(
-                () -> Text.literal(
-                        "Configured announcements:"
-                ),
-                false
-        );
-
-        for (AnnouncementConfig announcement :
-                ConfigManager.getConfig().announcements) {
-
-            String status = announcement.enabled
-                    ? "enabled"
-                    : "disabled";
-
-            source.sendFeedback(
-                    () -> Text.literal(
-                            "- " + announcement.id +
-                                    ": " + status +
-                                    ", every " +
-                                    announcement.interval +
-                                    " seconds"
-                    ),
-                    false
-            );
-        }
-
-        return 1;
-    }
-
     private static int reload(
             ServerCommandSource source
     ) {
@@ -537,66 +450,4 @@ public final class ServerSignalsCommands {
         );
     }
 
-    private static int testFirstEnabled(
-            ServerCommandSource source
-    ) {
-        for (AnnouncementConfig announcement :
-                ConfigManager.getConfig().announcements) {
-
-            if (!announcement.enabled) {
-                continue;
-            }
-
-            return testById(
-                    source,
-                    announcement.id
-            );
-        }
-
-        source.sendError(
-                Text.literal(
-                        "There are no enabled announcements to test."
-                )
-        );
-
-        return 0;
-    }
-
-    private static int testById(
-            ServerCommandSource source,
-            String announcementId
-    ) {
-        boolean found =
-                AnnouncementScheduler.broadcastNow(
-                        source.getServer(),
-                        announcementId
-                );
-
-        if (!found) {
-            source.sendError(
-                    Text.literal(
-                            "Unknown announcement ID: " +
-                                    announcementId
-                    )
-            );
-
-            return 0;
-        }
-
-        source.sendFeedback(
-                () -> Text.literal(
-                        "Tested announcement: " +
-                                announcementId
-                ),
-                false
-        );
-
-        ServerSignals.LOGGER.info(
-                "Announcement '{}' tested by {}.",
-                announcementId,
-                source.getName()
-        );
-
-        return 1;
-    }
 }

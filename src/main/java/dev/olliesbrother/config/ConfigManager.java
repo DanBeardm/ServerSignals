@@ -146,20 +146,6 @@ public final class ConfigManager {
         config =
                 loadedConfig;
 
-        ServerSignals.LOGGER.info(
-                "Loaded Server Signals configuration."
-        );
-
-        ServerSignals.LOGGER.info(
-                "Loaded {} announcement(s).",
-                config.announcements.size()
-        );
-
-        ServerSignals.LOGGER.info(
-                "Loaded {} scheduled command task(s).",
-                config.scheduledCommands.size()
-        );
-
         return true;
     }
 
@@ -1658,5 +1644,78 @@ public final class ConfigManager {
                             exception.getMessage()
             );
         }
+    }
+
+    public static void logStartupSummary() {
+
+        long enabledAnnouncements =
+                config.announcements
+                        .stream()
+                        .filter(announcement ->
+                                announcement.enabled
+                        )
+                        .count();
+
+        long enabledScheduledCommands =
+                config.scheduledCommands
+                        .stream()
+                        .filter(task ->
+                                task.enabled
+                        )
+                        .count();
+
+        int enabledPlayerMessages =
+                0;
+
+        if (config.playerMessages.join != null &&
+                config.playerMessages.join.enabled) {
+            enabledPlayerMessages++;
+        }
+
+        if (config.playerMessages.firstJoin != null &&
+                config.playerMessages.firstJoin.enabled) {
+            enabledPlayerMessages++;
+        }
+
+        if (config.playerMessages.leave != null &&
+                config.playerMessages.leave.enabled) {
+            enabledPlayerMessages++;
+        }
+
+
+        ServerSignals.LOGGER.info(
+                "Configuration:"
+        );
+
+        ServerSignals.LOGGER.info(
+                "  announcements.json       ✓ {} configured / {} enabled",
+                config.announcements.size(),
+                enabledAnnouncements
+        );
+
+        ServerSignals.LOGGER.info(
+                "  scheduled_commands.json  ✓ {} configured / {} enabled",
+                config.scheduledCommands.size(),
+                enabledScheduledCommands
+        );
+
+        ServerSignals.LOGGER.info(
+                "  player_messages.json     ✓ {}/3 enabled",
+                enabledPlayerMessages
+        );
+
+        ServerSignals.LOGGER.info(
+                "  restart.json             ✓ {}",
+                config.restart.enabled
+                        ? "enabled"
+                        : "disabled"
+        );
+
+        ServerSignals.LOGGER.info(
+                "  maintenance.json         ✓ {}",
+                config.maintenance.enabled
+                        ? "enabled"
+                        : "disabled"
+        );
     }
 }
