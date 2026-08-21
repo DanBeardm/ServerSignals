@@ -1,13 +1,17 @@
 {
   "schemaVersion": 1,
-  "id": "server_signals",
+  "id": "serversignals",
   "version": "${version}",
   "name": "Server Signals",
   "description": "A configurable server-side scheduling and communication toolkit for Fabric servers.",
-  "authors": [],
-  "contact": {},
-  "license": "All-Rights-Reserved",
-  "icon": "assets/server_signals/icon.png",
+  "authors": [
+    "OlliesBrother"
+  ],
+  "contact": {
+    "sources": "https://github.com/DanBeardm/ServerSignals",
+    "issues": "https://github.com/DanBeardm/ServerSignals/issues"
+  },
+  "license": "MIT",
   "environment": "server",
   "entrypoints": {
     "main": [
@@ -15,9 +19,13 @@
     ]
   },
   "depends": {
-    "fabricloader": ">=${loader_version}",
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
     "fabric-api": "*",
-    "minecraft": "${minecraft_version}",
     "fabric-permissions-api-v0": "*"
+  },
+  "suggests": {
+    "luckperms": "*"
   }
 }
