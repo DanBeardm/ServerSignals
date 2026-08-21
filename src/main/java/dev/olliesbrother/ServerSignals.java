@@ -1,6 +1,6 @@
 package dev.olliesbrother;
 
-import dev.olliesbrother.commands.RestartCommands;
+
 import dev.olliesbrother.commands.ServerSignalsCommands;
 import dev.olliesbrother.config.ConfigManager;
 import dev.olliesbrother.delivery.BossBarDeliveryService;
